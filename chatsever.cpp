@@ -54,15 +54,22 @@ void Chatsever::jsonReceived(ServerWorker *sender,const QJsonObject &docObj){
         const QJsonValue usernameVal = docObj.value("text");
         if (usernameVal.isNull() || !usernameVal.isString())
             return;
-        sender->setUserName(usernameVal.toString());
 
-        // 广播新用户加入
-        QJsonObject connectedMessage;
-        connectedMessage["type"] = "newuser";
-        connectedMessage["username"] = usernameVal.toString();
-        broadcast(connectedMessage, sender);
+        QString username = usernameVal.toString();
+        sender->setUserName(username);
 
-        // 发送当前用户列表给新用户
+        // 判断是否为管理员登录
+        bool isAdmin = (username == "admin");
+
+        // 广播新用户加入（管理员登录可以选择不广播给普通用户）
+        if (!isAdmin) {
+            QJsonObject connectedMessage;
+            connectedMessage["type"] = "newuser";
+            connectedMessage["username"] = username;
+            broadcast(connectedMessage, sender);
+        }
+
+        // 发送当前用户列表给新用户（包括管理员）
         QJsonObject userListMessage;
         userListMessage["type"] = "userlist";
         QJsonArray userListArray;
@@ -73,7 +80,25 @@ void Chatsever::jsonReceived(ServerWorker *sender,const QJsonObject &docObj){
         }
         userListMessage["userlist"] = userListArray;
         sender->sendJson(userListMessage);
+
+        qDebug() << (isAdmin ? "Admin" : "User") << "logged in:" << username;
     }
+    else if (typeVal.toString().compare("userlist_request", Qt::CaseInsensitive) == 0) {
+        // 构建在线用户列表消息
+        QJsonObject userListMessage;
+        userListMessage["type"] = "userlist";
+        QJsonArray userListArray;
+        for (ServerWorker *worker : m_clients) {
+            if (!worker->userName().isEmpty()) {
+                userListArray.append(worker->userName());
+            }
+        }
+        userListMessage["userlist"] = userListArray;
+
+        // 仅发送给请求的客户端（管理员）
+        sender->sendJson(userListMessage);
+    }
+
     else if (typeVal.toString().compare("history_request", Qt::CaseInsensitive) == 0) {
         // 调用处理历史信息的函数
         handleHistoryRequest(sender);
